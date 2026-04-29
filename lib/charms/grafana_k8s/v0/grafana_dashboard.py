@@ -217,7 +217,7 @@ LIBAPI = 0
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
 
-LIBPATCH = 49
+LIBPATCH = 50
 
 PYDEPS = ["cosl >= 0.0.50"]
 
@@ -1111,6 +1111,7 @@ class GrafanaDashboardProvider(Object):
         charm: CharmBase,
         relation_name: str = DEFAULT_RELATION_NAME,
         dashboards_path: str = "src/grafana_dashboards",
+        inject_dropdowns: bool = True,
     ) -> None:
         """API to provide Grafana dashboard to a Grafana charmed operator.
 
@@ -1161,6 +1162,8 @@ class GrafanaDashboardProvider(Object):
                 where dashboard templates can be located. By default, the library
                 expects dashboard files to be in the `<charm-py-directory>/grafana_dashboards`
                 directory.
+            inject_dropdowns: whether topology dropdowns should be added to dashboards
+                managed by this provider.
         """
         _validate_relation_by_interface_and_direction(
             charm, relation_name, RELATION_INTERFACE_NAME, RelationRole.provides
@@ -1180,6 +1183,7 @@ class GrafanaDashboardProvider(Object):
         self._charm = charm
         self._relation_name = relation_name
         self._dashboards_path = dashboards_path
+        self._inject_dropdowns = inject_dropdowns
 
         # No peer relation bucket we can rely on providers, keep StoredState here, too
         self._stored.set_default(dashboard_templates={})  # type: ignore
@@ -1197,7 +1201,7 @@ class GrafanaDashboardProvider(Object):
             self._on_grafana_dashboard_relation_changed,
         )
 
-    def add_dashboard(self, content: str, inject_dropdowns: bool = True) -> None:
+    def add_dashboard(self, content: str, inject_dropdowns: Optional[bool] = None) -> None:
         """Add a dashboard to the relation managed by this :class:`GrafanaDashboardProvider`.
 
         Args:
@@ -1207,6 +1211,9 @@ class GrafanaDashboardProvider(Object):
             inject_dropdowns: a :boolean: indicating whether topology dropdowns should be
                 added to the dashboard
         """
+        if inject_dropdowns is None:
+            inject_dropdowns = self._inject_dropdowns
+
         # Update of storage must be done irrespective of leadership, so
         # that the stored state is there when this unit becomes leader.
         stored_dashboard_templates: Any = self._stored.dashboard_templates  # pyright: ignore
@@ -1250,14 +1257,25 @@ class GrafanaDashboardProvider(Object):
             for dashboard_relation in self._charm.model.relations[self._relation_name]:
                 self._upset_dashboards_on_relation(dashboard_relation)
 
-    def reload_dashboards(self, inject_dropdowns: bool = True) -> None:
-        """Reloads dashboards and updates all relations."""
+    def reload_dashboards(self, inject_dropdowns: Optional[bool] = None) -> None:
+        """Reloads dashboards and updates all relations.
+
+        Args:
+            inject_dropdowns: a :boolean: indicating whether topology dropdowns should be
+                added to the dashboard. If None, the provider's default is used.
+        """
+        if inject_dropdowns is None:
+            inject_dropdowns = self._inject_dropdowns
+
         self._update_all_dashboards_from_dir(inject_dropdowns=inject_dropdowns)
 
     def _update_all_dashboards_from_dir(
-        self, _: Optional[HookEvent] = None, inject_dropdowns: bool = True
+        self, _: Optional[HookEvent] = None, inject_dropdowns: Optional[bool] = None
     ) -> None:
         """Scans the built-in dashboards and updates relations with changes."""
+        if inject_dropdowns is None:
+            inject_dropdowns = self._inject_dropdowns
+
         # Update of storage must be done irrespective of leadership, so
         # that the stored state is there when this unit becomes leader.
 
@@ -1284,7 +1302,7 @@ class GrafanaDashboardProvider(Object):
                 for dashboard_relation in self._charm.model.relations[self._relation_name]:
                     self._upset_dashboards_on_relation(dashboard_relation)
 
-    def _reinitialize_dashboard_data(self, inject_dropdowns: bool = True) -> None:
+    def _reinitialize_dashboard_data(self, inject_dropdowns: Optional[bool] = None) -> None:
         """Triggers a reload of dashboard outside an eventing workflow.
 
         Args:
@@ -1292,6 +1310,9 @@ class GrafanaDashboardProvider(Object):
 
         This will destroy any existing relation data.
         """
+        if inject_dropdowns is None:
+            inject_dropdowns = self._inject_dropdowns
+
         try:
             _resolve_dir_against_charm_path(self._charm, self._dashboards_path)
             self._update_all_dashboards_from_dir(inject_dropdowns=inject_dropdowns)

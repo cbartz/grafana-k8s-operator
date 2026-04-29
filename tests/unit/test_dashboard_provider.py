@@ -105,6 +105,12 @@ class ProviderCharm(CharmBase):
             self._stored.invalid_events += 1
 
 
+class ProviderCharmWithoutDropdowns(CharmBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+        self.provider = GrafanaDashboardProvider(self, inject_dropdowns=False)
+
+
 @patch.object(uuid, "uuid4", new=lambda: "12345678")
 class TestDashboardProvider(unittest.TestCase):
     def setUp(self):
@@ -240,6 +246,39 @@ class TestDashboardProvider(unittest.TestCase):
             "uuid": "12345678",
         }
         self.assertDictEqual(expected_data, actual_data)
+
+    def test_provider_inject_dropdowns_default_persists_across_events(self):
+        harness = Harness(ProviderCharmWithoutDropdowns, meta=CONSUMER_META)
+        harness._backend.model_name = "testing"
+        harness._backend.model_uuid = "abcdefgh-1234"
+        self.addCleanup(harness.cleanup)
+        harness.begin()
+        harness.set_leader(True)
+
+        rel_id = harness.add_relation("grafana-dashboard", "other_app")
+        harness.add_relation_unit(rel_id, "other_app/0")
+
+        expected_templates = copy.deepcopy(RELATION_TEMPLATES_DATA)
+        for template in expected_templates.values():
+            template["inject_dropdowns"] = False
+            template["juju_topology"] = {}
+
+        expected_data = {
+            "templates": expected_templates,
+            "uuid": "12345678",
+        }
+
+        self.assertDictEqual(
+            expected_data,
+            json.loads(harness.get_relation_data(rel_id, harness.model.app.name)["dashboards"]),
+        )
+
+        harness.charm.on.config_changed.emit()
+
+        self.assertDictEqual(
+            expected_data,
+            json.loads(harness.get_relation_data(rel_id, harness.model.app.name)["dashboards"]),
+        )
 
     def test_provider_empties_data_on_exception(self):
         rel_id = self.harness.add_relation("grafana-dashboard", "other_app")
